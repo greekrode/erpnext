@@ -489,6 +489,11 @@ class StockController(AccountsController):
 						else:
 							expense_account = item_row.expense_account
 
+							gl_entry_remarks = self.get("remarks") or _("Accounting Entry for Stock")
+
+							if self.doctype == "Delivery Note":
+								gl_entry_remarks = item_row.against_sales_invoice
+
 						gl_list.append(
 							self.get_gl_dict(
 								{
@@ -496,7 +501,7 @@ class StockController(AccountsController):
 									"against": expense_account,
 									"cost_center": item_row.cost_center,
 									"project": item_row.project or self.get("project"),
-									"remarks": self.get("remarks") or _("Accounting Entry for Stock"),
+									"remarks": gl_entry_remarks,
 									"debit": flt(sle.stock_value_difference, precision),
 									"is_opening": item_row.get("is_opening")
 									or self.get("is_opening")
