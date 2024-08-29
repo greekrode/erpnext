@@ -96,10 +96,7 @@ erpnext.PointOfSale.ItemSelector = class {
 
 		function get_item_image_html() {
 			if (!me.hide_images && item_image) {
-				return `<div class="item-qty-pill">
-							<span class="indicator-pill whitespace-nowrap ${indicator_color}">${qty_to_display}</span>
-						</div>
-						<div class="flex items-center justify-center h-32 border-b-grey text-6xl text-grey-100">
+				return `<div class="flex items-center justify-center h-32 border-b-grey text-6xl text-grey-100">
 							<img
 								onerror="cur_pos.item_selector.handle_broken_image(this)"
 								class="h-full item-img" src="${item_image}"
@@ -107,10 +104,7 @@ erpnext.PointOfSale.ItemSelector = class {
 							>
 						</div>`;
 			} else {
-				return `<div class="item-qty-pill">
-							<span class="indicator-pill whitespace-nowrap ${indicator_color}">${qty_to_display}</span>
-						</div>
-						<div class="item-display abbr">${frappe.get_abbr(item.item_name)}</div>`;
+				return `<div class="item-display abbr">${frappe.get_abbr(item.item_name)}</div>`;
 			}
 		}
 
@@ -124,7 +118,7 @@ erpnext.PointOfSale.ItemSelector = class {
 
 				<div class="item-detail">
 					<div class="item-name">
-						${frappe.ellipsis(item.item_name, 18)}
+						${item.item_name}
 					</div>
 					<div class="item-rate">${format_currency(price_list_rate, item.currency, precision) || 0} / ${uom}</div>
 				</div>

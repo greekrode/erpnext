@@ -168,13 +168,11 @@
 					display: flex;
 					flex-direction: column;
 					justify-content: center;
-					min-height: 3.5rem;
-					height: 3.5rem;
+					min-height: 7rem;
 					padding-left: var(--padding-sm);
 					padding-right: var(--padding-sm);
 
 					> .item-name {
-						@extend .nowrap;
 						display: flex;
 						align-items: center;
 						font-size: var(--text-md);
@@ -995,7 +993,7 @@
 			@extend .pos-card;
 			display: none;
 			position: relative;
-			width: 31rem;
+			width: 40rem;
 			height: 100%;
 
 			> .abs-container {

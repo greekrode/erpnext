@@ -363,14 +363,13 @@ def get_all_unconsolidated_invoices():
 
 
 def get_invoice_customer_map(pos_invoices):
-	# pos_invoice_customer_map = { 'Customer 1': [{}, {}, {}], 'Customer 2' : [{}] }
-	pos_invoice_customer_map = {}
+	customer_invoice_pairs = []
+
 	for invoice in pos_invoices:
 		customer = invoice.get("customer")
-		pos_invoice_customer_map.setdefault(customer, [])
-		pos_invoice_customer_map[customer].append(invoice)
+		customer_invoice_pairs.append((customer, invoice))
 
-	return pos_invoice_customer_map
+	return customer_invoice_pairs
 
 
 def consolidate_pos_invoices(pos_invoices=None, closing_entry=None):
@@ -454,8 +453,9 @@ def split_invoices(invoices):
 
 def create_merge_logs(invoice_by_customer, closing_entry=None):
 	try:
-		for customer, invoices in invoice_by_customer.items():
-			for _invoices in split_invoices(invoices):
+		for customer, invoice in invoice_by_customer:  # Adjusted to work with tuples
+            # Assuming split_invoices function can work with a single invoice
+			for _invoices in split_invoices([invoice]): # Wrapping invoice in a list
 				merge_log = frappe.new_doc("POS Invoice Merge Log")
 				merge_log.posting_date = (
 					getdate(closing_entry.get("posting_date")) if closing_entry else nowdate()

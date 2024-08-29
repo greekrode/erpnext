@@ -4,7 +4,7 @@
 
 import frappe
 from frappe import _
-from frappe.utils import flt, get_datetime
+from frappe.utils import flt, get_datetime, getdate, nowdate
 
 from erpnext.accounts.doctype.pos_invoice_merge_log.pos_invoice_merge_log import (
 	consolidate_pos_invoices,
@@ -58,8 +58,17 @@ class POSClosingEntry(StatusUpdater):
 		if frappe.db.get_value("POS Opening Entry", self.pos_opening_entry, "status") != "Open":
 			frappe.throw(_("Selected POS Opening Entry should be open."), title=_("Invalid Opening Entry"))
 
+		self.validate_posting_date_not_greater_than_today()
 		self.validate_duplicate_pos_invoices()
 		self.validate_pos_invoices()
+	
+	def validate_posting_date_not_greater_than_today(self):
+		posting_date = self.posting_date
+		if isinstance(posting_date, str):
+			posting_date = getdate(posting_date)
+
+		if posting_date > getdate(nowdate()):
+			frappe.throw(_("Posting date cannot be greater than today"))
 
 	def validate_duplicate_pos_invoices(self):
 		pos_occurences = {}

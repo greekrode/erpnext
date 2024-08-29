@@ -181,7 +181,8 @@
   "column_break_140",
   "auto_repeat",
   "update_auto_repeat_reference",
-  "against_income_account"
+  "against_income_account",
+  "is_member"
  ],
  "fields": [
   {
@@ -1551,6 +1552,15 @@
    "fieldtype": "Currency",
    "label": "Amount Eligible for Commission",
    "read_only": 1
+  },
+  {
+    "default": "0",
+    "fieldname": "is_member",
+    "fieldtype": "Check",
+    "label": "Is Member",
+    "no_copy": 1,
+    "hidden": 1,
+    "print_hide": 1
   },
   {
    "default": "1",

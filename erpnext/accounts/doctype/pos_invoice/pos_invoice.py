@@ -6,16 +6,25 @@ import frappe
 from frappe import _, bold
 from frappe.query_builder.functions import IfNull, Sum
 from frappe.utils import cint, flt, get_link_to_form, getdate, nowdate
+from frappe.utils.caching import redis_cache
+
+import requests
+import phonenumbers
+import re
 
 from erpnext.accounts.doctype.loyalty_program.loyalty_program import validate_loyalty_points
 from erpnext.accounts.doctype.payment_request.payment_request import make_payment_request
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import (
 	SalesInvoice,
+	get_bank_cash_account,
 	get_mode_of_payment_info,
 	update_multi_mode_option,
 )
 from erpnext.accounts.party import get_due_date, get_party_account
 from erpnext.stock.doctype.serial_no.serial_no import get_serial_nos
+
+frappe.utils.logger.set_log_level("INFO")
+logger = frappe.logger("bmv_api", with_more_info=True, allow_site=True, file_count=50)
 
 
 class POSInvoice(SalesInvoice):
@@ -215,6 +224,9 @@ class POSInvoice(SalesInvoice):
 			from erpnext.accounts.doctype.pricing_rule.utils import validate_coupon_code
 
 			validate_coupon_code(self.coupon_code)
+		
+		if frappe.local.conf.bmv_app_integration:
+			self.send_data_to_bmv_app()
 
 	def on_submit(self):
 		# create the loyalty point ledger entry if the customer is enrolled in any loyalty program
@@ -272,6 +284,166 @@ class POSInvoice(SalesInvoice):
 			update_coupon_code_count(self.coupon_code, "cancelled")
 
 		self.delink_serial_and_batch_bundle()
+	
+	def send_n8n_log(self, request, response):
+		url = frappe.local.conf.n8n_log_host + "/bmv-app-log"
+		headers = {'Authorization': frappe.local.conf.n8n_log_key,
+                   'Content-Type': 'application/json'}
+		data = {
+			'request': request,
+			'response': response
+		}
+
+		try:
+			resp = requests.post(url, headers=headers, json=data)
+			resp.raise_for_status()
+		except Exception as e:
+			return
+
+	def sanitize_phone_number(number, country='ID'):
+		parsed_number = phonenumbers.parse(number, country)
+
+		return phonenumbers.format_number(parsed_number, phonenumbers.PhoneNumberFormat.NATIONAL)
+	
+	@redis_cache(ttl=3600)
+	def get_access_token(self):
+		url = frappe.local.conf.bmv_app_host + "/oauth/token"
+		headers = {
+			'Content-Type': 'application/x-www-form-urlencoded',
+			'Accept': 'application/json'
+		}
+		data = {
+			'grant_type': 'client_credentials',
+			'client_id': frappe.local.conf.bmv_app_client_id,
+            'client_secret': frappe.local.conf.bmv_app_client_secret,
+            'scope': 'create-transaction'
+        }
+		
+		try:
+			response = requests.post(url, headers=headers, data=data)
+			logger.info(
+				f"Send access token request to BMV APP to request access token with data={data}")
+			response.raise_for_status()
+
+			return response.json()["access_token"]
+		except Exception as e:
+			error_msg = e.response.json()["message"]
+			logger.error(
+				f"Error request access token to BMV App: {e.response.json()}")
+			self.send_n8n_log(data, e.response.json())
+			frappe.throw(
+				_("Error while sending data to BMV App: {0}").format(
+					error_msg),
+				title=_("Loyalty Point Error")
+			)
+	
+	def send_data_to_bmv_app(self):
+		customer_phone = frappe.db.get_value(
+			"Customer", self.customer, "mobile_no")
+
+		# Extract member id and customer name
+		match = re.search(r'(.*)\b(\d{5,6})\b', self.customer_name, re.IGNORECASE)
+		bmv_match = re.search(r'(BMV-[A-Za-z0-9]+)', self.customer_name, re.IGNORECASE)
+		if match:
+			# Extract the raw customer name (may include the word 'member')
+			raw_customer_name = match.group(1).strip()
+
+			# Remove 'member' from the customer name if present
+			customer_name = re.sub(
+				r'\bmember\b', '', raw_customer_name, flags=re.IGNORECASE).strip()
+
+			# Extract the customer ID
+			customer_id = match.group(2)
+		elif bmv_match:
+			# Directly use the matched BMV ID as customer_id, including "BMV-"
+			customer_id = bmv_match.group(0)
+			# Use the part before "BMV-" as customer name and remove 'member' if present
+			customer_name = re.sub(
+				r'\bmember\b', '', self.customer_name.split(bmv_match.group(0))[0], flags=re.IGNORECASE).strip()
+		else:
+			return
+
+		# Get access token
+		access_token = self.get_access_token()
+
+		url = frappe.local.conf.bmv_app_host + "/api/transactions/erp"
+		headers = {
+            "Content-Type": "application/json",
+			"Authorization": f"Bearer {access_token}",
+			"Accept": "application/json"
+		}
+
+		data = {
+            "customer_id": self.customer,
+            "customer_name": customer_name,
+            "customer_code": customer_id,
+            "customer_phone": customer_phone,
+            "transaction_no": self.name,
+            "total_amount": self.net_total,
+            "transaction_date": self.creation
+        }
+
+		try:
+			response = requests.post(
+				url,
+                headers=headers,
+                json=data
+			)
+			response.raise_for_status()
+
+			json_data = response.json()
+			has_transaction = 'transaction' in json_data
+			has_member = 'member' in json_data
+
+			if not has_transaction and not has_member:
+				raise
+
+		except requests.exceptions.HTTPError as e:
+			if response.status_code == 401:
+				# Retry get_access_token without cache
+				self.get_access_token.clear_cache()
+				access_token = self.get_access_token()
+
+				headers["Authorization"] = f"Bearer {access_token}"
+				response = requests.post(
+					url,
+                    headers=headers,
+                    json=data
+                )
+
+				response.raise_for_status()
+			elif response.status_code == 400 and response.json().get('message') == "Member tidak ditemukan.":
+				logger.error(
+				f"Error create transaction ERP because member not found for member ID: {customer_id}")
+				self.send_n8n_log(data, e.response.json())
+				frappe.throw(_("Member not found."),
+                             title=_("Member Point Error"))
+			else:
+				error_msg = e.response.json()["message"]
+				logger.error(
+					f"Error create transaction to BMV App: {e.response.json()}")
+				self.send_n8n_log(data, e.response.json())
+				frappe.throw(
+					_("Error while sending data to BMV App: {0}").format(
+                        error_msg),
+                    title=_("Member Point Error")
+                )
+		except Exception as e:
+			error_msg = e.response.json()["message"]
+			logger.error(
+                f"Error create transaction to BMV App: {e.response.json()}")
+			self.send_n8n_log(data, e.response.json())
+			frappe.throw(
+                _("Error while sending data to BMV App: {0}").format(
+                    error_msg),
+                title=_("Member Point Error")
+            )
+		else:
+			logger.info(
+                f"Member point updated for member ID: {customer_id} and customer code: {self.customer} and response={response.json()}")
+			self.db_set("is_member", 1)
+			frappe.msgprint(frappe._("Member point updated to BMV App"),
+                            indicator="green", alert=True, title=("Member Point"))
 
 	def delink_serial_and_batch_bundle(self):
 		for row in self.items:

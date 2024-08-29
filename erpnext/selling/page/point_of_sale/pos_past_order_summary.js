@@ -80,7 +80,8 @@ erpnext.PointOfSale.PastOrderSummary = class {
 		return `<div class="left-section">
 					<div class="customer-name">${doc.customer}</div>
 					<div class="customer-email">${this.customer_email}</div>
-					<div class="cashier">${__("Sold by")}: ${doc.owner}</div>
+					<div class="cashier">${__("Created by")}: ${doc.owner}</div>
+					<div class="cashier">${__("Sold by")}: ${doc.sales_partner}</div>
 				</div>
 				<div class="right-section">
 					<div class="paid-amount">${format_currency(doc.paid_amount, doc.currency)}</div>
@@ -111,8 +112,12 @@ erpnext.PointOfSale.PastOrderSummary = class {
 
 	get_discount_html(doc) {
 		if (doc.discount_amount) {
+			const discount_rate = parseFloat(
+				(doc.discount_amount / doc.base_total * 100)
+				.toFixed(2)
+				);
 			return `<div class="summary-row-wrapper">
-						<div>Discount (${doc.additional_discount_percentage} %)</div>
+						<div>Discount (${discount_rate} %)</div>
 						<div>${format_currency(doc.discount_amount, doc.currency)}</div>
 					</div>`;
 		} else {
@@ -122,8 +127,8 @@ erpnext.PointOfSale.PastOrderSummary = class {
 
 	get_net_total_html(doc) {
 		return `<div class="summary-row-wrapper">
-					<div>${__("Net Total")}</div>
-					<div>${format_currency(doc.net_total, doc.currency)}</div>
+					<div>${__("Base Total")}</div>
+					<div>${format_currency(doc.base_total, doc.currency)}</div>
 				</div>`;
 	}
 

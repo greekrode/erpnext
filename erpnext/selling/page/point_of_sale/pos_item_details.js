@@ -170,7 +170,7 @@ erpnext.PointOfSale.ItemDetails = class {
 			);
 
 			const field_meta = this.item_meta.fields.find((df) => df.fieldname === fieldname);
-			fieldname === "discount_percentage" ? (field_meta.label = __("Discount (%)")) : "";
+			fieldname === "discount_amount" ? (field_meta.label = __("Discount Amount")) : "";
 			const me = this;
 
 			this[`${fieldname}_control`] = frappe.ui.form.make_control({
@@ -194,12 +194,8 @@ erpnext.PointOfSale.ItemDetails = class {
 	get_form_fields(item) {
 		const fields = [
 			"qty",
-			"uom",
 			"rate",
-			"conversion_factor",
-			"discount_percentage",
-			"warehouse",
-			"actual_qty",
+			"discount_amount",
 			"price_list_rate",
 		];
 		if (item.has_serial_no) fields.push("serial_no");

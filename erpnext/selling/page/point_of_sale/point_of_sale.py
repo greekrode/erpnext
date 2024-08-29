@@ -341,6 +341,9 @@ def set_customer_info(fieldname, customer, value=""):
 		new_contact.save()
 		contact = new_contact.name
 		frappe.db.set_value("Customer", customer, "customer_primary_contact", contact)
+	
+	if fieldname == "customer_name":
+		frappe.db.set_value("Customer", customer, "customer_name", value)
 
 	contact_doc = frappe.get_doc("Contact", contact)
 	if fieldname == "email_id":

@@ -340,7 +340,7 @@ erpnext.PointOfSale.ItemCart = class {
 		if (customer) {
 			return new Promise((resolve) => {
 				frappe.db
-					.get_value("Customer", customer, ["email_id", "mobile_no", "image", "loyalty_program"])
+					.get_value("Customer", customer, ["customer_name", "email_id", "mobile_no", "image", "loyalty_program"])
 					.then(({ message }) => {
 						const { loyalty_program } = message;
 						// if loyalty program then fetch loyalty points too
@@ -439,7 +439,7 @@ erpnext.PointOfSale.ItemCart = class {
 
 	update_customer_section() {
 		const me = this;
-		const { customer, email_id = "", mobile_no = "", image } = this.customer_info || {};
+		const { customer, email_id = "", mobile_no = "", image, customer_name } = this.customer_info || {};
 
 		if (customer) {
 			this.$customer_section.html(
@@ -447,10 +447,10 @@ erpnext.PointOfSale.ItemCart = class {
 					<div class="customer-display">
 						${this.get_customer_image()}
 						<div class="customer-name-desc">
-							<div class="customer-name">${customer}</div>
+							<div class="customer-name">${customer_name}</div>
 							${get_customer_description()}
 						</div>
-						<div class="reset-customer-btn" data-customer="${escape(customer)}">
+						<div class="reset-customer-btn" data-customer="${encodeURIComponent(customer)}">
 							<svg width="32" height="32" viewBox="0 0 14 14" fill="none">
 								<path d="M4.93764 4.93759L7.00003 6.99998M9.06243 9.06238L7.00003 6.99998M7.00003 6.99998L4.93764 9.06238L9.06243 4.93759" stroke="#8D99A6"/>
 							</svg>
@@ -872,6 +872,7 @@ erpnext.PointOfSale.ItemCart = class {
 					</div>
 				</div>
 				<div class="customer-fields-container">
+					<div class="customer_name-field"></div>
 					<div class="email_id-field"></div>
 					<div class="mobile_no-field"></div>
 					<div class="loyalty_program-field"></div>
@@ -899,6 +900,12 @@ erpnext.PointOfSale.ItemCart = class {
 		const $customer_form = this.$customer_section.find(".customer-fields-container");
 
 		const dfs = [
+			{
+				fieldname: "customer_name",
+				label: __("Customer Name"),
+				fieldtype: "Data",
+				placeholder: __("Enter customer's name"),
+			},
 			{
 				fieldname: "email_id",
 				label: __("Email"),
