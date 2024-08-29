@@ -166,6 +166,22 @@ class AccountsController(TransactionBase):
 						raise_exception=1,
 					)
 
+	def validate_posting_date_not_greater_than_today(self):
+		date_to_check = None
+		if hasattr(self, 'posting_date'):
+			date_to_check = self.posting_date
+		elif hasattr(self, 'transaction_date'):
+			date_to_check = self.transaction_date
+
+		if not date_to_check:
+			return
+
+		if isinstance(date_to_check, str):
+			date_to_check = getdate(date_to_check)
+
+		if date_to_check > getdate(nowdate()):
+			frappe.throw(_("Posting/Transaction date cannot be greater than today"))
+
 	def validate(self):
 		if not self.get("is_return") and not self.get("is_debit_note"):
 			self.validate_qty_is_not_zero()
@@ -185,6 +201,7 @@ class AccountsController(TransactionBase):
 
 		self.ensure_supplier_is_not_blocked()
 
+		self.validate_posting_date_not_greater_than_today()
 		self.validate_date_with_fiscal_year()
 		self.validate_party_accounts()
 
@@ -1714,6 +1731,7 @@ class AccountsController(TransactionBase):
 								),
 								"cost_center": item.cost_center,
 								"project": item.project,
+								"remarks": item.remarks,
 							},
 							account_currency,
 							item=item,
@@ -1735,6 +1753,7 @@ class AccountsController(TransactionBase):
 								),
 								"cost_center": item.cost_center,
 								"project": item.project or self.project,
+								"remarks": item.remarks,
 							},
 							account_currency,
 							item=item,
