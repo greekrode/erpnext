@@ -22,6 +22,7 @@
   "gender",
   "date_of_birth",
   "salutation",
+  "npwp",
   "column_break1",
   "date_of_joining",
   "image",
@@ -151,6 +152,11 @@
    "oldfieldname": "salutation",
    "oldfieldtype": "Select",
    "options": "Salutation"
+  },
+  {
+   "fieldname": "npwp",
+   "fieldtype": "Data",
+   "label": "NPWP"
   },
   {
    "fieldname": "first_name",
