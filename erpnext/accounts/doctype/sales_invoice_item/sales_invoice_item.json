@@ -633,7 +633,6 @@
   {
    "fieldname": "item_group",
    "fieldtype": "Link",
-   "hidden": 1,
    "label": "Item Group",
    "oldfieldname": "item_group",
    "oldfieldtype": "Link",
@@ -642,13 +641,16 @@
    "read_only": 1
   },
   {
+   "fetch_from": "item_code.brand",
+   "fetch_if_empty": 1,
    "fieldname": "brand",
-   "fieldtype": "Data",
-   "hidden": 1,
+   "fieldtype": "Link",
    "label": "Brand Name",
    "oldfieldname": "brand",
-   "oldfieldtype": "Data",
-   "print_hide": 1
+   "oldfieldtype": "Link",
+   "options": "Brand",
+   "print_hide": 1,
+   "read_only": 1
   },
   {
    "fieldname": "item_tax_rate",

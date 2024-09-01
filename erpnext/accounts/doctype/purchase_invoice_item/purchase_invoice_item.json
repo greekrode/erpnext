@@ -580,12 +580,14 @@
    "print_hide": 1
   },
   {
+   "fetch_from": "item_code.brand",
+   "fetch_if_empty": 1,
    "fieldname": "brand",
    "fieldtype": "Link",
-   "hidden": 1,
    "label": "Brand",
    "options": "Brand",
-   "print_hide": 1
+   "print_hide": 1,
+   "read_only": 1
   },
   {
    "fetch_from": "item_code.item_group",
