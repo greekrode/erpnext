@@ -21,6 +21,7 @@
   "column_break1",
   "parent_account",
   "account_type",
+  "sub_account_type",
   "tax_rate",
   "freeze_account",
   "balance_must_be",
@@ -121,8 +122,18 @@
    "label": "Account Type",
    "oldfieldname": "account_type",
    "oldfieldtype": "Select",
-   "options": "\nAccumulated Depreciation\nAsset Received But Not Billed\nBank\nCash\nChargeable\nCapital Work in Progress\nCost of Goods Sold\nCurrent Asset\nCurrent Liability\nDepreciation\nDirect Expense\nDirect Income\nEquity\nExpense Account\nExpenses Included In Asset Valuation\nExpenses Included In Valuation\nFixed Asset\nIncome Account\nIndirect Expense\nIndirect Income\nLiability\nPayable\nReceivable\nRound Off\nStock\nStock Adjustment\nStock Received But Not Billed\nService Received But Not Billed\nTax\nTemporary,\nOther Income Account\nOther Expense Account",
+   "options": "\nAccumulated Depreciation\nAsset Received But Not Billed\nBank\nCash\nChargeable\nCapital Work in Progress\nCost of Goods Sold\nCurrent Asset\nCurrent Liability\nDepreciation\nDirect Expense\nDirect Income\nEquity\nExpense Account\nExpenses Included In Asset Valuation\nExpenses Included In Valuation\nFixed Asset\nIncome Account\nIndirect Expense\nIndirect Income\nLiability\nPayable\nReceivable\nRound Off\nStock\nStock Adjustment\nStock Received But Not Billed\nService Received But Not Billed\nTax\nTemporary",
    "search_index": 1
+  },
+  {
+   "description": "Setting Sub Account Type helps in forming report data",
+   "fieldname": "sub_account_type",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Sub Account Type",
+   "options": "\nEmployee Receivable\nBPJS Company Charge\nBPJS Employee Charge\nTax Payable Account\nCash Account\nReceivable Account\nInventory Account\nOther Current Asset Account\nFixed Asset Account\nAccumulated Depreciation Account\nBusiness Liability Account\nOther Current Liability Account\nEquity Account",
+   "search_index": 1,
+   "reqd": 1
   },
   {
    "description": "Rate at which this tax is applied",

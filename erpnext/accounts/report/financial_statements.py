@@ -5,10 +5,11 @@
 import functools
 import math
 import re
+import erpnext
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, add_months, cint, cstr, flt, formatdate, get_first_day, getdate
+from frappe.utils import add_days, add_months, cint, cstr, flt, formatdate, get_first_day, getdate, fmt_money
 
 from erpnext.accounts.doctype.accounting_dimension.accounting_dimension import (
 	get_accounting_dimensions,
@@ -211,6 +212,143 @@ def get_data(
 
 	return out
 
+def get_bs_data(
+        company,
+        root_type,
+        balance_must_be,
+        period_list,
+        filters=None,
+        accumulated_values=1,
+        only_current_fiscal_year=True,
+        ignore_closing_entries=False,
+        ignore_accumulated_values_for_fy=False,
+        total=True,
+        sub_account_type=None,
+):
+
+    accounts = get_bs_accounts(company, sub_account_type)
+    if not accounts:
+        return None
+
+    accounts, accounts_by_name, parent_children_map = filter_accounts(accounts)
+
+    company_currency = get_appropriate_currency(company, filters)
+
+    gl_entries_by_account = {}
+    for root in frappe.db.sql(
+            """select lft, rgt from tabAccount
+			where sub_account_type=%s""",
+            (sub_account_type),
+            as_dict=1,
+    ):
+
+        set_gl_entries_by_account(
+            company,
+            period_list[0]["year_start_date"] if only_current_fiscal_year else None,
+            period_list[-1]["to_date"],
+            root.lft,
+            root.rgt,
+            filters,
+            gl_entries_by_account,
+            ignore_closing_entries=ignore_closing_entries,
+            root_type=root_type,
+        )
+
+    calculate_values(
+        accounts_by_name,
+        gl_entries_by_account,
+        period_list,
+        accumulated_values,
+        ignore_accumulated_values_for_fy,
+    )
+    # accumulate_values_into_parents(accounts, accounts_by_name, period_list)
+    out = prepare_bs_data(accounts, balance_must_be,
+                       period_list, company_currency)
+    out = filter_out_zero_value_rows(out, parent_children_map)
+
+    if out and total:
+        add_bs_total_row(out, root_type,
+                      period_list, company_currency, sub_account_type)
+
+    return out
+
+def get_pl_data(
+        company,
+        root_type,
+        balance_must_be,
+        period_list,
+        filters=None,
+        accumulated_values=1,
+        only_current_fiscal_year=True,
+        ignore_closing_entries=False,
+        ignore_accumulated_values_for_fy=False,
+        total=True,
+        account_type=None,
+        cogs_only=False,
+):
+
+    accounts = get_pl_accounts(company, root_type, account_type, cogs_only)
+    if not accounts:
+        return None
+
+    accounts, accounts_by_name, parent_children_map = filter_accounts(accounts)
+
+    company_currency = get_appropriate_currency(company, filters)
+
+    gl_entries_by_account = {}
+    sql_query = """select lft, rgt from tabAccount where """
+    sql_args = []
+
+    if account_type is not None:
+        sql_query += "account_type=%s and "
+        sql_args.append(account_type)
+    else:
+        if cogs_only:
+            temp_account_type = ['Cost of Goods Sold', 'Stock Adjustment']
+            sql_query += "account_type in %s and "
+        elif root_type == 'Income':
+            temp_account_type = ['Other Income Account']
+            sql_query += "account_type not in %s and "
+        else:
+            temp_account_type = ['Other Expense Account',
+                                 'Cost of Goods Sold', 'Stock Adjustment']
+            sql_query += "account_type not in %s and "
+        sql_args.append(temp_account_type)
+
+    sql_query += "root_type=%s and ifnull(parent_account, '') = ''"
+    sql_args.append(root_type)
+
+    for root in frappe.db.sql(sql_query, sql_args, as_dict=1):
+
+        set_gl_entries_by_account(
+            company,
+            period_list[0]["year_start_date"] if only_current_fiscal_year else None,
+            period_list[-1]["to_date"],
+            root.lft,
+            root.rgt,
+            filters,
+            gl_entries_by_account,
+            ignore_closing_entries=ignore_closing_entries,
+            root_type=root_type,
+        )
+
+    calculate_values(
+        accounts_by_name,
+        gl_entries_by_account,
+        period_list,
+        accumulated_values,
+        ignore_accumulated_values_for_fy,
+    )
+    accumulate_values_into_parents(accounts, accounts_by_name, period_list)
+    out = prepare_pl_data(accounts, balance_must_be,
+                          period_list, company_currency, cogs_only)
+    out = filter_out_zero_value_rows(out, parent_children_map)
+
+    if out and total:
+        add_pl_total_row(out, root_type, balance_must_be,
+                      period_list, company_currency, account_type, cogs_only)
+
+    return out
 
 def get_appropriate_currency(company, filters=None):
 	if filters and filters.get("presentation_currency"):
@@ -284,9 +422,9 @@ def prepare_data(accounts, balance_must_be, period_list, company_currency, accum
 				"account_type": d.account_type,
 				"is_group": d.is_group,
 				"opening_balance": d.get("opening_balance", 0.0) * (1 if balance_must_be == "Debit" else -1),
-				"account_name": (
-					f"{_(d.account_number)} - {_(d.account_name)}" if d.account_number else _(d.account_name)
-				),
+				"account_name": (_(d.account_name)),
+				"sub_account_type": (_(d.sub_account_type)),
+				"account_type": (_(d.account_type)),
 			}
 		)
 		for period in period_list:
@@ -313,11 +451,365 @@ def prepare_data(accounts, balance_must_be, period_list, company_currency, accum
 
 	return data
 
+def add_summary_dict(account_name, lft, rgt, root_type):
+    return frappe._dict(
+        {
+            "name": account_name,
+            "account_number": "0",
+            "parent_account": "",
+            "lft": lft,
+            "rgt": rgt,
+            "root_type": root_type,
+            "report_type": "Balance Sheet",
+            "account_name": account_name,
+            "include_in_gross": 0,
+            "account_type": "",
+            "is_group": 1,
+            "indent": 0,
+            "opening_balance": 0
+        }
+    )
+
+def add_bs_data_header(accounts):
+    if any(account.get("sub_account_type") == "Cash Account" for account in accounts):
+        return add_summary_dict('Kas dan Setara Kas', 1, 16, 'Asset')
+
+    if any(account.get("sub_account_type") == 'Receivable Account' for account in accounts):
+        return add_summary_dict('Piutang Usaha', 17, 26, 'Asset')
+
+    if any(account.get("sub_account_type") == 'Inventory Account' for account in accounts):
+        return add_summary_dict('Persediaan', 27, 32, 'Asset')
+
+    if any(account.get("sub_account_type") == 'Other Current Asset Account' for account in accounts):
+        return add_summary_dict('Aset Lancar Lainnya', 33, 46, 'Asset')
+
+    if any(account.get("sub_account_type") == 'Fixed Asset Account' for account in accounts):
+        return add_summary_dict('Nilai Histori', 33, 46, 'Asset')
+
+    if any(account.get("sub_account_type") == 'Accumulated Depreciation Account' for account in accounts):
+        return add_summary_dict('Akumulasi Penyusutan', 33, 46, 'Asset')
+
+    if any(account.get("sub_account_type") == 'Business Liability Account' for account in accounts):
+        return add_summary_dict('Utang Usaha', 33, 46, 'Liability')
+
+    if any(account.get("sub_account_type") == 'Other Current Liability Account' for account in accounts):
+        return add_summary_dict('Kewajiban Jangka Pendek Lainnya', 33, 46, 'Liability')
+
+    if any(account.get("sub_account_type") == 'Equity Account' for account in accounts):
+        return add_summary_dict('EKUITAS', 33, 46, 'Equity')
+
+
+
+def prepare_bs_data(accounts, balance_must_be, period_list, company_currency):
+    # Remove accounts with is_group = 1 and no parent_account
+    accounts = [account for account in accounts if not (
+        account.get("is_group") == 1 and not account.get("parent_account"))]
+
+    accounts.insert(0, add_bs_data_header(accounts))
+
+    data = []
+    year_start_date = period_list[0]["year_start_date"].strftime("%Y-%m-%d")
+    year_end_date = period_list[-1]["year_end_date"].strftime("%Y-%m-%d")
+
+    for d in accounts:
+        # add to output
+        has_value = False
+        total = 0
+        row = frappe._dict(
+            {
+                "account": _(d.name),
+                "parent_account": _(d.parent_account) if d.parent_account else "",
+                "indent": flt(d.indent),
+                "year_start_date": year_start_date,
+                "year_end_date": year_end_date,
+                "currency": company_currency,
+                "include_in_gross": d.include_in_gross,
+                "account_type": d.account_type,
+                "is_group": d.is_group,
+                "opening_balance": d.get("opening_balance", 0.0) * (1 if balance_must_be == "Debit" else -1),
+                "account_name": (_(d.account_name))
+            }
+        )
+        for period in period_list:
+            if d.get(period.key) and balance_must_be == "Credit":
+                # change sign based on Debit or Credit, since calculation is done using (debit - credit)
+                d[period.key] *= -1
+
+            row[period.key] = flt(d.get(period.key, 0.0), 3)
+
+            if abs(row[period.key]) >= 0.005:
+                # ignore zero values
+                has_value = True
+                total += flt(row[period.key])
+
+        row["has_value"] = has_value
+        row["total"] = total
+        data.append(row)
+
+    return data
+
+
+
+def prepare_pl_data(accounts, balance_must_be, period_list, company_currency, cogs_only):
+    # Remove accounts with is_group = 1 and no parent_account
+    accounts = [account for account in accounts if not (
+        account.get("is_group") == 1 and not account.get("parent_account"))]
+
+    if any(account.get("root_type") == "Income" and account.get("account_type") == "Income Account" for account in accounts):
+        income_summary_account = frappe._dict(
+            {
+                "name": "PENDAPATAN",
+                "account_number": "0",
+                "parent_account": "",
+                "lft": 119,
+                "rgt": 126,
+                "root_type": "Income",
+                "report_type": "Profit and Loss",
+                "account_name": "PENDAPATAN",
+                "include_in_gross": 0,
+                "account_type": "",
+                "is_group": 1,
+                "indent": 0,
+                "opening_balance": 0
+            }
+        )
+        accounts.insert(0, income_summary_account)
+    elif any(account.get("root_type") == "Income" and account.get("account_type") == "Other Income Account" for account in accounts):
+        other_income_summary_account = frappe._dict(
+            {
+                "name": "Pendapatan Non Operasional",
+                "account_number": "0",
+                "parent_account": "",
+                "lft": 119,
+                "rgt": 126,
+                "root_type": "Income",
+                "report_type": "Profit and Loss",
+                "account_name": "Pendapatan Non Operasional",
+                "include_in_gross": 0,
+                "account_type": "",
+                "is_group": 1,
+                "indent": 0,
+                "opening_balance": 0
+            }
+        )
+        accounts.insert(0, other_income_summary_account)
+    elif any(account.get("root_type") == "Expense" and account.get("account_type") == "Expense Account" for account in accounts):
+        other_expense_summary_account = frappe._dict(
+            {
+                "name": "Beban Operasional",
+                "account_number": "0",
+                "parent_account": "",
+                "lft": 139,
+                "rgt": 222,
+                "root_type": "Expense",
+                "report_type": "Profit and Loss",
+                "account_name": "Beban Operasional",
+                "include_in_gross": 0,
+                "account_type": "",
+                "is_group": 1,
+                "indent": 0,
+                "opening_balance": 0
+            }
+        )
+        accounts.insert(0, other_expense_summary_account)
+    elif any(account.get("root_type") == "Expense" and account.get("account_type") == "Other Expense Account" for account in accounts):
+        other_expense_summary_account = frappe._dict(
+            {
+                "name": "Beban Non Operasional",
+                "account_number": "0",
+                "parent_account": "",
+                "lft": 139,
+                "rgt": 222,
+                "root_type": "Expense",
+                "report_type": "Profit and Loss",
+                "account_name": "Beban Non Operasional",
+                "include_in_gross": 0,
+                "account_type": "",
+                "is_group": 1,
+                "indent": 0,
+                "opening_balance": 0
+            }
+        )
+        accounts.insert(0, other_expense_summary_account)
+    elif cogs_only:
+        cogs_summary_account = frappe._dict(
+            {
+                "name": "Beban Pokok Penjualan",
+                "account_number": "0",
+                "parent_account": "",
+                "lft": 131,
+                "rgt": 138,
+                "root_type": "Expense",
+                "report_type": "Profit and Loss",
+                "account_name": "Beban Pokok Penjualan",
+                "include_in_gross": 0,
+                "account_type": "",
+                "is_group": 1,
+                "indent": 0,
+                "opening_balance": 0
+            }
+        )
+        accounts.insert(0, cogs_summary_account)
+
+    data = []
+    year_start_date = period_list[0]["year_start_date"].strftime("%Y-%m-%d")
+    year_end_date = period_list[-1]["year_end_date"].strftime("%Y-%m-%d")
+
+    for d in accounts:
+        # add to output
+        has_value = False
+        total = 0
+        row = frappe._dict(
+            {
+                "account": _(d.name),
+                "parent_account": _(d.parent_account) if d.parent_account else "",
+                "indent": flt(d.indent),
+                "year_start_date": year_start_date,
+                "year_end_date": year_end_date,
+                "currency": company_currency,
+                "include_in_gross": d.include_in_gross,
+                "account_type": d.account_type,
+                "is_group": d.is_group,
+                "opening_balance": d.get("opening_balance", 0.0) * (1 if balance_must_be == "Debit" else -1),
+                "account_name": (_(d.account_name))
+            }
+        )
+        for period in period_list:
+            if d.get(period.key) and balance_must_be == "Credit":
+                # change sign based on Debit or Credit, since calculation is done using (debit - credit)
+                d[period.key] *= -1
+
+            row[period.key] = flt(d.get(period.key, 0.0), 3)
+
+            if abs(row[period.key]) >= 0.005:
+                # ignore zero values
+                has_value = True
+                total += flt(row[period.key])
+
+        row["has_value"] = has_value
+        row["total"] = total
+        data.append(row)
+
+    return data
+
+
+def add_total_row(out, root_type, balance_must_be, period_list, company_currency, account_type=None):
+    if account_type is not None:
+        if account_type == 'Other Income Account':
+            root_type = 'Other Income'
+        elif account_type == 'Other Expense Account':
+            root_type = 'Other Expense'
+
+    total_row = {
+        "account_name": _("Total {0} ({1})").format(_(root_type), _(balance_must_be)),
+        "account": _("Total {0} ({1})").format(_(root_type), _(balance_must_be)),
+        "currency": company_currency,
+        "opening_balance": 0.0,
+    }
+
+    for row in out:
+        if not row.get("parent_account"):
+            for period in period_list:
+                total_row.setdefault(period.key, 0.0)
+                total_row[period.key] += row.get(period.key, 0.0)
+
+            total_row.setdefault("total", 0.0)
+            total_row["total"] += flt(row["total"])
+            total_row["opening_balance"] += row["opening_balance"]
+
+    if "total" in total_row:
+        out.append(total_row)
+
+        # blank row after Total
+        out.append({})
+
+def add_bs_total_row(out, period_list, company_currency, sub_account_type):
+	account_type = None
+
+	if sub_account_type == "Cash Account":
+		account_type = 'Kas dan Setara Kas'
+	elif sub_account_type == "Receivable Account":
+		account_type = 'Piutang Usaha'
+	elif sub_account_type == "Inventory Account":
+		account_type = 'Persediaan'
+	elif sub_account_type == "Other Current Asset Account":
+		account_type = 'Aset Lancar Lainnya'
+	elif sub_account_type == "Fixed Asset Account":
+		account_type = 'Nilai Histori'
+	elif sub_account_type == "Accumulated Depreciation Account":
+		account_type = 'Akumulasi Penyusutan'
+	elif sub_account_type == "Business Liability Account":
+		account_type = 'Utang Usaha'
+	elif sub_account_type == "Other Current Liability Account":
+		account_type = 'Kewajiban Jangka Pendek Lainnya'
+	elif sub_account_type == "Equity Account":
+		account_type = 'Ekuitas'
+
+	total_row = {
+		"account_name": _("Jumlah {0}").format(_(account_type)),
+		"account": _("Jumlah {0}").format(_(account_type)),
+		"currency": company_currency,
+		"opening_balance": 0.0,
+	}
+
+	for row in out:
+		for period in period_list:
+			total_row.setdefault(period.key, 0.0)
+			total_row[period.key] += row.get(period.key, 0.0)
+
+			total_row.setdefault("total", 0.0)
+			total_row["total"] += flt(row["total"])
+			total_row["opening_balance"] += row["opening_balance"]
+
+	if "total" in total_row:
+		out.append(total_row)
+
+		# blank row after Total
+		out.append({})
+
+def add_pl_total_row(out, root_type, balance_must_be, period_list, company_currency, account_type=None, cogs_only=False):
+    if account_type is not None:
+        if account_type == 'Other Income Account':
+            root_type = 'Pendapatan Non Operasional'
+        elif account_type == 'Other Expense Account':
+            root_type = 'Beban Non Operasional'
+
+    if root_type is not None:
+        if cogs_only:
+            root_type = 'Beban Pokok Penjualan'
+        elif root_type == 'Income':
+            root_type = 'Pendapatan'
+        elif root_type == 'Expense':
+            root_type = 'Beban'
+
+    total_row = {
+        "account_name": _("Jumlah {0}").format(_(root_type)),
+        "account": _("Jumlah {0}").format(_(root_type)),
+        "currency": company_currency,
+        "opening_balance": 0.0,
+    }
+
+    for row in out:
+        for period in period_list:
+            total_row.setdefault(period.key, 0.0)
+            total_row[period.key] += row.get(period.key, 0.0)
+
+            total_row.setdefault("total", 0.0)
+            total_row["total"] += flt(row["total"])
+            total_row["opening_balance"] += row["opening_balance"]
+
+    if "total" in total_row:
+        out.append(total_row)
+
+        # blank row after Total
+        out.append({})
 
 def filter_out_zero_value_rows(data, parent_children_map, show_zero_values=False):
 	data_with_value = []
 	for d in data:
 		if show_zero_values or d.get("has_value"):
+			data_with_value.append(d)
+		elif d.get("is_group") == 1:
 			data_with_value.append(d)
 		else:
 			# show group with zero balance, if there are balances against child
@@ -330,42 +822,63 @@ def filter_out_zero_value_rows(data, parent_children_map, show_zero_values=False
 
 	return data_with_value
 
-
-def add_total_row(out, root_type, balance_must_be, period_list, company_currency):
-	total_row = {
-		"account_name": _("Total {0} ({1})").format(_(root_type), _(balance_must_be)),
-		"account": _("Total {0} ({1})").format(_(root_type), _(balance_must_be)),
-		"currency": company_currency,
-		"opening_balance": 0.0,
-	}
-
-	for row in out:
-		if not row.get("parent_account"):
-			for period in period_list:
-				total_row.setdefault(period.key, 0.0)
-				total_row[period.key] += row.get(period.key, 0.0)
-
-			total_row.setdefault("total", 0.0)
-			total_row["total"] += flt(row["total"])
-			total_row["opening_balance"] += row["opening_balance"]
-
-	if "total" in total_row:
-		out.append(total_row)
-
-		# blank row after Total
-		out.append({})
-
-
 def get_accounts(company, root_type):
 	return frappe.db.sql(
 		"""
-		select name, account_number, parent_account, lft, rgt, root_type, report_type, account_name, include_in_gross, account_type, is_group, lft, rgt
+		select name, account_number, parent_account, lft, rgt, root_type, report_type, account_name, include_in_gross, account_type, sub_account_type, is_group, lft, rgt
 		from `tabAccount`
 		where company=%s and root_type=%s order by lft""",
 		(company, root_type),
 		as_dict=True,
 	)
 
+def get_bs_accounts(company, sub_account_type):
+    return frappe.db.sql(
+        """
+        select name, account_number, parent_account, lft, rgt, root_type, report_type, account_name, include_in_gross, account_type, sub_account_type, is_group
+        from `tabAccount`
+        where company=%s and sub_account_type=%s order by lft""",
+        (company, sub_account_type),
+        as_dict=True,
+    )
+
+def get_pl_accounts(company, root_type, account_type, cogs_only):
+    if account_type is not None:
+        return frappe.db.sql(
+            """
+			select name, account_number, parent_account, lft, rgt, root_type, report_type, account_name, include_in_gross, account_type, sub_account_type, is_group, lft, rgt
+			from `tabAccount`
+			where company=%s and root_type=%s and account_type=%s order by lft""",
+            (company, root_type, account_type),
+            as_dict=True,
+        )
+    else:
+        if cogs_only:
+            account_type = ['Cost of Goods Sold', 'Stock Adjustment']
+            return frappe.db.sql(
+                """
+                select name, account_number, parent_account, lft, rgt, root_type, report_type, account_name, include_in_gross, account_type, sub_account_type, is_group, lft, rgt
+                from `tabAccount`
+                where company=%s and root_type=%s and account_type in %s order by lft""",
+                (company, root_type, account_type),
+                as_dict=True,
+            )
+
+        account_type = ''
+        if root_type == 'Income':
+            account_type = ['Other Income Account']
+        else:
+            account_type = ['Other Expense Account',
+                            'Cost of Goods Sold', 'Stock Adjustment']
+
+        return frappe.db.sql(
+            """
+			select name, account_number, parent_account, lft, rgt, root_type, report_type, account_name, include_in_gross, account_type, sub_account_type, is_group, lft, rgt
+			from `tabAccount`
+			where company=%s and root_type=%s and account_type not in %s order by lft""",
+            (company, root_type, account_type),
+            as_dict=True,
+        )
 
 def filter_accounts(accounts, depth=20):
 	parent_children_map = {}
@@ -665,3 +1178,23 @@ def get_filtered_list_for_consolidated_report(filters, period_list):
 			filtered_summary_list.append(period)
 
 	return filtered_summary_list
+
+def sum_values(array, key):
+    return sum(flt(item[key], 3) for item in array if key in item and item.get("has_value"))
+
+def format_currency(value):
+    default_currency = erpnext.get_default_currency()
+    return fmt_money(value, 0, default_currency)
+
+def finalize_data(data, period_list):
+    for item in data:
+        for period in period_list:
+            key = period['key']
+
+            # Check if key exists in item
+            if key in item:
+                # Check and modify the value of data[key] based on your conditions
+                if item[key] == 0.0:
+                    item[key] = None  # or item[key] = '' for an empty string
+                else:
+                    item[key] = format_currency(item[key])
