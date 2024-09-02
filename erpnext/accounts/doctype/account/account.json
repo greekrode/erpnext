@@ -132,8 +132,7 @@
    "in_standard_filter": 1,
    "label": "Sub Account Type",
    "options": "\nEmployee Receivable\nBPJS Company Charge\nBPJS Employee Charge\nTax Payable Account\nCash Account\nReceivable Account\nInventory Account\nOther Current Asset Account\nFixed Asset Account\nAccumulated Depreciation Account\nBusiness Liability Account\nOther Current Liability Account\nEquity Account",
-   "search_index": 1,
-   "reqd": 1
+   "search_index": 1
   },
   {
    "description": "Rate at which this tax is applied",
