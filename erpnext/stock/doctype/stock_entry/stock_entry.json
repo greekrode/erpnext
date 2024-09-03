@@ -296,7 +296,8 @@
    "oldfieldname": "from_warehouse",
    "oldfieldtype": "Link",
    "options": "Warehouse",
-   "print_hide": 1
+   "print_hide": 1,
+   "mandatory_depends_on": "eval:doc.stock_entry_type == 'Material Issue'"
   },
   {
    "depends_on": "from_warehouse",
@@ -326,7 +327,8 @@
    "oldfieldname": "to_warehouse",
    "oldfieldtype": "Link",
    "options": "Warehouse",
-   "print_hide": 1
+   "print_hide": 1,
+   "mandatory_depends_on": "eval:doc.stock_entry_type == 'Material Receipt'"
   },
   {
    "depends_on": "to_warehouse",
